@@ -11,6 +11,7 @@ export const DashboardPage = {
   dashboardData: {},
   deviceData: {},
   recentLogs: [],
+  clockSkewMs: 0,
 
   async mount(container) {
     this.container = container;
@@ -41,6 +42,35 @@ export const DashboardPage = {
   },
 
   async loadInitialData() {
+    // Calibrate clock skew using database RPC or public Time API
+    try {
+      const start = Date.now();
+      let serverDateStr = null;
+      try {
+        serverDateStr = await apiService.getServerTime();
+      } catch (rpcErr) {
+        console.warn('RPC clock sync failed, attempting public Time API fallback:', rpcErr.message);
+        try {
+          const fallbackResp = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
+          const fallbackData = await fallbackResp.json();
+          serverDateStr = fallbackData.utc_datetime;
+        } catch (apiErr) {
+          console.warn('Public Time API fallback failed:', apiErr.message);
+        }
+      }
+
+      if (serverDateStr) {
+        const serverDate = new Date(serverDateStr);
+        const end = Date.now();
+        const rtt = end - start;
+        this.clockSkewMs = (serverDate.getTime() + rtt / 2) - end;
+        console.log(`[CLOCK] Calibrated clock skew: ${this.clockSkewMs}ms (RTT: ${rtt}ms)`);
+      }
+    } catch (e) {
+      console.warn('All clock skew calibration paths failed:', e);
+      this.clockSkewMs = 0;
+    }
+
     // 1. Fetch dashboard aggregates (required)
     try {
       this.dashboardData = await apiService.getDashboardStatus();
@@ -160,7 +190,9 @@ export const DashboardPage = {
 
   render() {
     const isOnline = this.isDeviceOnline();
-    const ldrVal = this.deviceData.wifi_rssi ? '2150' : '--'; // Simulated placeholder LDR reading for UI demonstration
+    const ldrVal = isOnline && this.deviceData.ldr_value !== undefined && this.deviceData.ldr_value !== null 
+      ? this.deviceData.ldr_value 
+      : '--';
     const isDay = this.dashboardData.is_daytime;
     const rssi = this.deviceData.wifi_rssi || -75;
     
@@ -305,6 +337,7 @@ export const DashboardPage = {
     const valHb = document.getElementById('ui-val-heartbeat');
     const valWifi = document.getElementById('ui-val-wifi');
     const valUptime = document.getElementById('ui-val-uptime');
+    const valLDR = document.getElementById('ui-val-ldr');
 
     if (valHw) valHw.textContent = isOnline ? 'Online' : 'Offline';
     if (iconHw) {
@@ -325,6 +358,11 @@ export const DashboardPage = {
     }
     if (valUptime) {
       valUptime.textContent = this.formatUptime(this.deviceData.uptime_seconds);
+    }
+    if (valLDR) {
+      valLDR.textContent = isOnline && this.deviceData.ldr_value !== undefined && this.deviceData.ldr_value !== null 
+        ? this.deviceData.ldr_value 
+        : '--';
     }
 
     this.updateGlobalHeader(isOnline);
@@ -377,10 +415,10 @@ export const DashboardPage = {
   isDeviceOnline() {
     if (!this.deviceData || !this.deviceData.last_heartbeat) return false;
     const lastHb = new Date(this.deviceData.last_heartbeat);
-    const now = new Date();
-    // Device is offline if no heartbeat received in past 30 seconds
+    const now = new Date(Date.now() + (this.clockSkewMs || 0));
+    // Device is offline if no heartbeat received in past 35 seconds
     const diff = (now - lastHb) / 1000;
-    return diff < 30;
+    return diff < 35;
   },
 
   formatUptime(seconds) {

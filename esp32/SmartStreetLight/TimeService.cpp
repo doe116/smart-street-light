@@ -1,6 +1,7 @@
 #include "TimeService.h"
-#include <time.h>
+#include "Config.h"
 #include <sys/time.h>
+#include <time.h>
 
 TimeService::TimeService() {
   rtcFound = false;
@@ -8,20 +9,24 @@ TimeService::TimeService() {
 }
 
 void TimeService::init() {
-  // Start I2C bus on standard pins (SDA=21, SCL=22 is default on standard ESP32)
-  Wire.begin();
-  
+  // Start I2C bus on pins defined in Config.h (SDA = PIN_RTC_DAT, SCL =
+  // PIN_RTC_CLK)
+  Wire.begin(PIN_RTC_DAT, PIN_RTC_CLK);
+
   if (rtc.begin()) {
     rtcFound = true;
-    Serial.println(F("[RTC] DS3231 RTC Module detected and initialized successfully."));
+    Serial.println(
+        F("[RTC] DS3231 RTC Module detected and initialized successfully."));
     if (rtc.lostPower()) {
-      Serial.println(F("[RTC] Warning: RTC lost power. Initializing to NTP sync default."));
+      Serial.println(F(
+          "[RTC] Warning: RTC lost power. Initializing to NTP sync default."));
       rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     }
   } else {
-    Serial.println(F("[RTC] Error: Hardware DS3231 RTC not detected. Falling back to ESP32 Internal Software RTC."));
+    Serial.println(F("[RTC] Error: Hardware DS3231 RTC not detected. Falling "
+                     "back to ESP32 Internal Software RTC."));
   }
-  
+
   // Set system environment time zone (e.g. GMT+3)
   setenv("TZ", "EAT-3", 1);
   tzset();
@@ -31,7 +36,7 @@ bool TimeService::syncWithNTP() {
   Serial.print(F("[NTP] Querying NTP servers..."));
   // Config time with 0 offset (UTC) so that the RTC chip stores UTC time
   configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-  
+
   struct tm timeinfo;
   int attempts = 0;
   // Wait up to 5 seconds for synchronization
@@ -40,11 +45,11 @@ bool TimeService::syncWithNTP() {
     Serial.print(F("."));
     attempts++;
   }
-  
+
   if (attempts < 10) {
     Serial.println(F(" Synchronized successfully!"));
     time_t now = time(nullptr);
-    
+
     // Adjust hardware RTC clock register
     if (rtcFound) {
       rtc.adjust(DateTime(now));
@@ -70,11 +75,11 @@ uint32_t TimeService::getEpochTime() {
 String TimeService::getISO8601Timestamp() {
   char buf[30];
   uint32_t epoch = getEpochTime();
-  
+
   // Convert UTC epoch to tm structure
   time_t rawtime = (time_t)epoch;
   struct tm *ts = gmtime(&rawtime);
-  
+
   // Format: YYYY-MM-DDTHH:MM:SSZ
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", ts);
   return String(buf);
@@ -84,11 +89,11 @@ String TimeService::getFormattedTime() {
   char buf[10];
   uint32_t epoch = getEpochTime();
   time_t rawtime = (time_t)epoch;
-  
+
   // Adjust to local timezone
   rawtime += timezoneOffsetSeconds;
   struct tm *ts = gmtime(&rawtime);
-  
+
   strftime(buf, sizeof(buf), "%H:%M", ts);
   return String(buf);
 }
@@ -99,7 +104,7 @@ bool TimeService::isNightTime(String nightStart, String nightEnd) {
   int startMin = nightStart.substring(3, 5).toInt();
   int endHour = nightEnd.substring(0, 2).toInt();
   int endMin = nightEnd.substring(3, 5).toInt();
-  
+
   // Get current time
   uint32_t epoch = getEpochTime();
   time_t rawtime = (time_t)epoch + timezoneOffsetSeconds;

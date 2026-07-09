@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#090d16"/>
+      <stop offset="100%" style="stop-color:#1e293b"/>
+    </linearGradient>
+    <linearGradient id="poleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#38bdf8"/>
+      <stop offset="100%" style="stop-color:#0284c7"/>
+    </linearGradient>
+    <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fde68a;stop-opacity:1"/>
+      <stop offset="60%" style="stop-color:#fbbf24;stop-opacity:0.9"/>
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="64" height="64" rx="14" ry="14" fill="url(#bgGrad)"/>
+
+  <!-- IoT signal arcs (WiFi-like, top-right) -->
+  <g filter="url(#glow)" opacity="0.85">
+    <path d="M 44 14 A 6 6 0 0 1 56 14" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M 41 10 A 11 11 0 0 1 59 10" fill="none" stroke="#38bdf8" stroke-width="1.7" stroke-linecap="round" opacity="0.65"/>
+    <path d="M 38 6  A 17 17 0 0 1 62 6"  fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+    <!-- dot at center of arcs -->
+    <circle cx="50" cy="17" r="2" fill="#38bdf8"/>
+  </g>
+
+  <!-- Street lamp pole -->
+  <rect x="29" y="30" width="6" height="28" rx="2" fill="url(#poleGrad)" filter="url(#glow)"/>
+
+  <!-- Lamp arm (horizontal) -->
+  <rect x="22" y="26" width="20" height="5" rx="2.5" fill="url(#poleGrad)" filter="url(#glow)"/>
+
+  <!-- Lamp head (lantern body) -->
+  <rect x="19" y="18" width="14" height="10" rx="3" fill="url(#poleGrad)" filter="url(#glow)"/>
+
+  <!-- Glow halo behind bulb -->
+  <ellipse cx="26" cy="22" rx="8" ry="6" fill="#fde68a" opacity="0.18" filter="url(#softGlow)"/>
+
+  <!-- Bulb bright core -->
+  <ellipse cx="26" cy="22" rx="4.5" ry="3.5" fill="url(#glowGrad)" filter="url(#glow)"/>
+  <ellipse cx="26" cy="22" rx="2.5" ry="2" fill="#fffde7" opacity="0.95"/>
+
+  <!-- Base ground line -->
+  <rect x="22" y="57" width="20" height="3" rx="1.5" fill="#38bdf8" opacity="0.5"/>
+</svg>

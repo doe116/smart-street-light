@@ -72,21 +72,47 @@ CREATE TABLE IF NOT EXISTS device_status (
   uptime_seconds bigint,
   firmware_version varchar(50),
   last_heartbeat timestamp with time zone DEFAULT now(),
-  status varchar(20) DEFAULT 'ONLINE'
+  status varchar(20) DEFAULT 'ONLINE',
+  ldr_value integer
 );
 
+-- Alter table to add ldr_value if the table already existed without it
+ALTER TABLE device_status ADD COLUMN IF NOT EXISTS ldr_value integer;
+
+-- Create trigger function to automatically update heartbeat timestamp on update
+CREATE OR REPLACE FUNCTION update_device_heartbeat()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.last_heartbeat = now();
+  NEW.status = 'ONLINE';
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Bind the heartbeat trigger
+DROP TRIGGER IF EXISTS trg_device_status_updated ON device_status;
+CREATE TRIGGER trg_device_status_updated
+BEFORE UPDATE ON device_status
+FOR EACH ROW
+EXECUTE FUNCTION update_device_heartbeat();
+
 -- Insert initial device row if missing
-INSERT INTO device_status (id, wifi_rssi, uptime_seconds, firmware_version, status)
-VALUES (1, -50, 0, '1.0.0', 'ONLINE')
+INSERT INTO device_status (id, wifi_rssi, uptime_seconds, firmware_version, status, ldr_value)
+VALUES (1, -50, 0, '1.0.0', 'ONLINE', 2000)
 ON CONFLICT (id) DO NOTHING;
 
 -- 5. Extend system settings for calibration
 INSERT INTO system_settings (id, setting_key, setting_value, description)
 VALUES 
-  (5, 'detection_distance', '8', 'Threshold distance in cm for vehicle detection'),
+  (5, 'detection_distance', '35', 'Threshold distance in cm for vehicle detection'),
   (6, 'heartbeat_interval', '10', 'Interval in seconds between heartbeats'),
-  (7, 'realtime_polling_interval', '2', 'Website/device refresh polling configuration')
+  (7, 'realtime_polling_interval', '0.3', 'Website/device refresh polling configuration')
 ON CONFLICT (id) DO NOTHING;
+
+-- Force update detection distance to 35 cm if it was previously set to 8 cm
+UPDATE system_settings 
+SET setting_value = '35' 
+WHERE setting_key = 'detection_distance' AND setting_value = '8';
 
 -- 6. Add default values for base system settings if missing
 INSERT INTO system_settings (id, setting_key, setting_value, description)
@@ -101,3 +127,32 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO dashboard_status (id, total_vehicles_direction1, total_vehicles_direction2, total_vehicles_all, light_status, current_mode, is_daytime, last_vehicle_detected_at, last_updated)
 VALUES (1, 0, 0, 0, 'OFF', 'auto', false, NULL, now())
 ON CONFLICT (id) DO NOTHING;
+
+-- 8. Add helper function to get current database server time for client clock skew calibration
+CREATE OR REPLACE FUNCTION get_server_time()
+RETURNS timestamp with time zone AS $$
+BEGIN
+  RETURN now();
+END;
+$$ LANGUAGE plpgsql;
+
+-- 9. Enable realtime replication for required tables
+DO $$
+DECLARE
+  t text;
+  tables text[] := ARRAY['device_status', 'dashboard_status', 'vehicle_detections', 'light_status', 'admin_logs'];
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_class WHERE relname = t AND relnamespace = 'public'::regnamespace
+    ) AND NOT EXISTS (
+      SELECT 1 FROM pg_publication_rel pr
+      JOIN pg_class c ON pr.prrelid = c.oid
+      JOIN pg_publication p ON pr.prpubid = p.oid
+      WHERE c.relname = t AND p.pubname = 'supabase_realtime'
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;
+

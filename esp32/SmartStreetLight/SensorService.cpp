@@ -40,8 +40,8 @@ float SensorService::readRawDistance() {
   digitalWrite(trigPin, LOW);
   
   // Measure the bounce back pulse duration in microseconds
-  // Timeout set to 25000us (covers up to ~4.2 meters)
-  long duration = pulseIn(echoPin, HIGH, 25000);
+  // Timeout set to 15000us (covers up to ~2.5 meters, reducing latency)
+  long duration = pulseIn(echoPin, HIGH, 15000);
   
   if (duration == 0) {
     return SENSOR_MAX_DISTANCE_CM; // Timeout or sensor fault

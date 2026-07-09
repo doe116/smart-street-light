@@ -8,7 +8,7 @@ export const SettingsPage = {
 
   async mount(container) {
     this.container = container;
-    
+
     // Resolve logged in email for logs
     const session = await authService.getSession();
     this.adminEmail = session?.user?.email || 'admin';
@@ -93,7 +93,7 @@ export const SettingsPage = {
                 <!-- Realtime Polling Interval -->
                 <div class="col-md-6">
                   <label for="realtime_polling_interval" class="form-label fw-semibold" style="font-size: 0.85rem; color: var(--text-secondary);">Web Refresh Polling (seconds)</label>
-                  <input type="number" class="form-control" id="realtime_polling_interval" value="${this.settingsData.realtime_polling_interval || '2'}" required>
+                  <input type="number" step="0.1" min="0.1" class="form-control" id="realtime_polling_interval" value="${this.settingsData.realtime_polling_interval || '2'}" required>
                   <div class="form-text text-muted">Polling rate configured for dashboard widgets.</div>
                 </div>
               </div>
@@ -141,7 +141,7 @@ export const SettingsPage = {
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      
+
       const keysToUpdate = [
         'light_on_duration',
         'ldr_threshold_day',

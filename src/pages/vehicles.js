@@ -191,24 +191,8 @@ export const VehiclesPage = {
       const randomVal = Math.random() * (7 - 2) + 2;
       const roundedVal = Math.round(randomVal * 10) / 10;
       
-      // 1. Add vehicle detection log
+      // Add vehicle detection log (which updates last_vehicle_detected_at to trigger the ESP32)
       await apiService.addVehicleDetection(direction, roundedVal);
-
-      // 2. Fetch current status to check if it's daytime
-      const status = await apiService.getDashboardStatus();
-      if (status && status.is_daytime) {
-        // Turn the light ON (Manual Override)
-        await apiService.sendLightCommand('ON', 'manual', 'Simulation');
-
-        // Turn the light back OFF (Auto Mode) after 2 seconds
-        setTimeout(async () => {
-          try {
-            await apiService.sendLightCommand('OFF', 'auto', 'Simulation');
-          } catch (err) {
-            console.error('Failed to restore light mode after simulation:', err);
-          }
-        }, 2000);
-      }
     } catch (e) {
       console.error('Failed to simulate vehicle detection:', e);
     }

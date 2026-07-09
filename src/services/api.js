@@ -214,6 +214,16 @@ export const apiService = {
   },
 
   /**
+   * Fetch current database server time
+   * @returns {Promise<string>}
+   */
+  async getServerTime() {
+    const { data, error } = await supabase.rpc('get_server_time');
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * Helper to write records to admin_logs table
    * @param {string} actionType 
    * @param {string} details 
