@@ -190,9 +190,21 @@ export const VehiclesPage = {
       // Random sensor distance between 2 and 7 (e.g. 4.3 cm)
       const randomVal = Math.random() * (7 - 2) + 2;
       const roundedVal = Math.round(randomVal * 10) / 10;
-      
+
       // Add vehicle detection log (which updates last_vehicle_detected_at to trigger the ESP32)
       await apiService.addVehicleDetection(direction, roundedVal);
+
+      // Immediately override light to ON — mirrors ESP32's 2-second physical response
+      await apiService.simulateLightOn();
+
+      // After 2 seconds, turn light back OFF (same duration as ESP32 hardware timer)
+      setTimeout(async () => {
+        try {
+          await apiService.simulateLightOff();
+        } catch (e) {
+          console.warn('[Simulate] Failed to auto-reset light OFF after 2s:', e);
+        }
+      }, 2000);
     } catch (e) {
       console.error('Failed to simulate vehicle detection:', e);
     }

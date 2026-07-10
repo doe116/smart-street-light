@@ -149,6 +149,58 @@ export const apiService = {
 
 
   /**
+   * Immediately sync light state to ON (called by simulate vehicle — mirrors ESP32 2s timer start)
+   * @returns {Promise<any>}
+   */
+  async simulateLightOn() {
+    let isDaytime = false;
+    try {
+      const dash = await this.getDashboardStatus();
+      isDaytime = dash.is_daytime;
+    } catch (_) {}
+
+    const { data, error } = await supabase
+      .from('light_status')
+      .insert({
+        status: 'ON',
+        mode: 'auto',
+        triggered_by: 'vehicle_simulation',
+        is_daytime: isDaytime,
+        illumination_level: 4095,
+        updated_at: new Date().toISOString()
+      })
+      .select();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Sync light state to OFF (called 2 s after simulate vehicle — mirrors ESP32 timer expiry)
+   * @returns {Promise<any>}
+   */
+  async simulateLightOff() {
+    let isDaytime = false;
+    try {
+      const dash = await this.getDashboardStatus();
+      isDaytime = dash.is_daytime;
+    } catch (_) {}
+
+    const { data, error } = await supabase
+      .from('light_status')
+      .insert({
+        status: 'OFF',
+        mode: 'auto',
+        triggered_by: 'vehicle_simulation',
+        is_daytime: isDaytime,
+        illumination_level: 4095,
+        updated_at: new Date().toISOString()
+      })
+      .select();
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * Query logs of admin actions
    * @param {number} limit 
    * @param {number} offset 
