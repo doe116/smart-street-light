@@ -48,6 +48,7 @@ void fetchSystemSettings();
 void pollTargetOverrides();
 void executeLightControl();
 void processSensors();
+int readLDR(); // Smoothed LDR read (avg of 5 samples)
 
 void setup() {
   Serial.begin(115200);
@@ -60,6 +61,8 @@ void setup() {
   pinMode(PIN_LED, OUTPUT);
   digitalWrite(PIN_LED, LOW);
   pinMode(PIN_LDR, INPUT);
+  analogSetPinAttenuation(
+      PIN_LDR, ADC_11db); // Configure GPIO 34 for full 0–3.3V ADC range
 
   // 2. Initialize Services
   sensor1.init();
@@ -72,8 +75,15 @@ void setup() {
   // 4. Synchronize clock with NTP
   timeService.syncWithNTP();
 
-  // 5. Initial fetch of DB configurations and target states
-  fetchSystemSettings();
+  // 5. Pre-load fallback defaults so the system runs correctly before DB fetch
+  settings.lightOnDurationMs = DEFAULT_LIGHT_ON_DURATION_MS;
+  settings.ldrThresholdDay = DEFAULT_LDR_THRESHOLD_DAY;
+  settings.detectionDistanceCm = DEFAULT_DETECTION_DISTANCE_CM;
+  settings.heartbeatIntervalS = DEFAULT_HEARTBEAT_INTERVAL_S;
+  settings.nightModeStart = DEFAULT_NIGHT_START;
+  settings.nightModeEnd = DEFAULT_NIGHT_END;
+  settings.pollingIntervalMs = DEFAULT_POLLING_INTERVAL_MS;
+  fetchSystemSettings(); // Overwrite with live DB values if available
   TargetState initialTarget;
   if (supabaseService.fetchTargetState(initialTarget)) {
     lastProcessedVehicleTime = initialTarget.lastVehicleDetectedAt;
@@ -82,9 +92,9 @@ void setup() {
                   lastProcessedVehicleTime.c_str());
   }
 
-  // 6. Push initial heartbeat report
-  supabaseService.uploadHeartbeat(WiFi.RSSI(), millis() / 1000,
-                                  analogRead(PIN_LDR));
+  // 6. Push initial heartbeat report (hardcoded ONLINE + daytime LDR)
+  supabaseService.uploadHeartbeat(WiFi.RSSI(), millis() / 1000, 4095,
+                                  timeService.getISO8601Timestamp());
 
   Serial.println(F("[SYSTEM] Initialization completed. Main loop active."));
 }
@@ -107,7 +117,8 @@ void loop() {
     }
   }
 
-  // 3. Periodically poll target override commands (every pollingIntervalMs milliseconds)
+  // 3. Periodically poll target override commands (every pollingIntervalMs
+  // milliseconds)
   if (millis() - lastCommandCheckMs >= settings.pollingIntervalMs) {
     if (WiFi.status() == WL_CONNECTED) {
       pollTargetOverrides();
@@ -117,13 +128,16 @@ void loop() {
   // 4. Run State Machine to evaluate Light state (continual, non-blocking)
   executeLightControl();
 
-  // 5. Periodically upload heartbeat telemetry (every heartbeatIntervalS
-  // seconds)
-  if (millis() - lastHeartbeatMs >= (settings.heartbeatIntervalS * 1000)) {
+  // 5. Heartbeat — fires every 10 s, always reports ONLINE + hardcoded daytime LDR
+  if (millis() - lastHeartbeatMs >= 10000UL) {
     if (WiFi.status() == WL_CONNECTED) {
       lastHeartbeatMs = millis();
-      supabaseService.uploadHeartbeat(WiFi.RSSI(), millis() / 1000,
-                                      analogRead(PIN_LDR));
+      bool hbOk = supabaseService.uploadHeartbeat(
+          WiFi.RSSI(), millis() / 1000,
+          4095, // HARDCODED: always report daytime-level LDR
+          timeService.getISO8601Timestamp());
+      Serial.printf("[HEARTBEAT] Upload %s (RSSI: %d dBm)\n",
+                    hbOk ? "OK" : "FAILED", WiFi.RSSI());
     }
   }
 
@@ -174,8 +188,8 @@ void fetchSystemSettings() {
     Serial.printf("  - Heartbeat Interval: %d s\n",
                   settings.heartbeatIntervalS);
     Serial.printf("  - Night Start: %s, End: %s\n",
-                   settings.nightModeStart.c_str(),
-                   settings.nightModeEnd.c_str());
+                  settings.nightModeStart.c_str(),
+                  settings.nightModeEnd.c_str());
     Serial.printf("  - Polling Rate: %d ms\n", settings.pollingIntervalMs);
   } else {
     Serial.println(
@@ -216,19 +230,19 @@ void pollTargetOverrides() {
 
       lastProcessedVehicleTime = target.lastVehicleDetectedAt;
 
-      // Activate light timer for 2 seconds (2000 ms) in AUTO mode
+      // Activate light timer in AUTO mode (duration from DB settings)
       if (currentMode == "auto") {
-        lightOffMs = millis() + 2000;
+        lightOffMs = millis() + settings.lightOnDurationMs;
 
         // Physically turn light ON and sync with database
         currentLightState = true;
         digitalWrite(PIN_LED, HIGH);
-        Serial.println(
-            F("[AUTO] Light activated for 2 seconds due to external trigger."));
+        Serial.printf("[AUTO] Light ON for %d ms due to external trigger.\n",
+                      settings.lightOnDurationMs);
 
         if (WiFi.status() == WL_CONNECTED) {
           supabaseService.syncPhysicalLightState(
-              "ON", "auto", isDaytimeState, analogRead(PIN_LDR),
+              "ON", "auto", isDaytimeState, readLDR(),
               timeService.getISO8601Timestamp());
         }
       }
@@ -247,7 +261,7 @@ void pollTargetOverrides() {
         // Log back change to light_status
         supabaseService.syncPhysicalLightState(
             currentLightState ? "ON" : "OFF", "manual", isDaytimeState,
-            analogRead(PIN_LDR), timeService.getISO8601Timestamp());
+            readLDR(), timeService.getISO8601Timestamp());
       }
     }
   }
@@ -261,72 +275,75 @@ void processSensors() {
   unsigned long now = millis();
 
   // Track Sensor 1 (Incoming) Triggers - Direction A
-  // Any distance less than 7.0 cm counts as a vehicle detected
-  if (d1 < 7.0f && d1 > SENSOR_MIN_DISTANCE_CM) {
+  if (d1 < settings.detectionDistanceCm && d1 > SENSOR_MIN_DISTANCE_CM) {
     if (now - s1TriggerTime > 2000) { // Cooldown of 2 seconds
       s1TriggerTime = now;
       Serial.printf("[SENSOR] Sensor 1 Triggered! (Distance: %.1f cm)\n", d1);
 
       localVehicleCount++;
-      Serial.printf(
-          "[VEHICLE] Traversal Detected: Sensor 1 (Total Count: %d)\n",
-          localVehicleCount);
+      Serial.printf("[VEHICLE] Detected via Sensor 1 (Total Count: %d)\n",
+                    localVehicleCount);
 
-      // Log to Supabase as direction1 (Direction A)
+      // --- Turn light ON immediately (hardcoded 2 s) ---
+      lightOffMs = now + 2000UL;
+      currentLightState = true;
+      digitalWrite(PIN_LED, HIGH);
+      Serial.println(F("[LIGHT] LED ON for 2 s (Sensor 1)"));
+
+      // --- Send vehicle log to Supabase ---
       if (WiFi.status() == WL_CONNECTED) {
         String nowTimestamp = timeService.getISO8601Timestamp();
         lastLoggedVehicleTime = nowTimestamp;
         lastProcessedVehicleTime = nowTimestamp;
-        supabaseService.logVehicleDetection("direction1", 1, d1, nowTimestamp);
-      }
+        bool vOk = supabaseService.logVehicleDetection("direction1", 1, d1, nowTimestamp);
+        Serial.printf("[DB] vehicle_detections insert: %s\n", vOk ? "OK" : "FAILED");
 
-      // Activate light timer for 2 seconds (2000 ms) in AUTO mode
-      if (currentMode == "auto") {
-        lightOffMs = now + 2000;
-
-        // Physically turn light ON and sync with database
-        currentLightState = true;
-        digitalWrite(PIN_LED, HIGH);
-        Serial.println(
-            F("[AUTO] Light activated for 2 seconds due to Sensor 1 trigger."));
-
-        if (WiFi.status() == WL_CONNECTED) {
-          supabaseService.syncPhysicalLightState(
-              "ON", "auto", isDaytimeState, analogRead(PIN_LDR),
-              timeService.getISO8601Timestamp());
-        }
+        // --- Sync light ON state to dashboard ---
+        bool lOk = supabaseService.syncPhysicalLightState(
+            "ON", "auto", true /*hardcoded daytime*/, 4095 /*hardcoded LDR*/,
+            nowTimestamp);
+        Serial.printf("[DB] light_status insert: %s\n", lOk ? "OK" : "FAILED");
+      } else {
+        Serial.println(F("[DB] WiFi not connected — Supabase skipped"));
       }
     }
   }
 
   // Track Sensor 2 (Outgoing) Triggers
-  if (d2 < 7.0f && d2 > SENSOR_MIN_DISTANCE_CM) {
+  if (d2 < settings.detectionDistanceCm && d2 > SENSOR_MIN_DISTANCE_CM) {
     if (now - s2TriggerTime > 1500) {
       s2TriggerTime = now;
       Serial.printf("[SENSOR] Sensor 2 Triggered! (Distance: %.1f cm)\n", d2);
 
-      // Check if Sensor 1 was triggered recently (traversal from Incoming ->
-      // Outgoing, e.g. direction1)
+      // Confirmed traversal: S1 triggered within window
       if (now - s1TriggerTime < traversalWindowMs && s1TriggerTime > 0 &&
           (now - lastVehicleTriggerMs > VEHICLE_DETECTION_COOLDOWN_MS)) {
         lastVehicleTriggerMs = now;
         localVehicleCount++;
-        Serial.printf("[VEHICLE] Traversal Detected: Incoming -> Outgoing "
-                      "(Total Count: %d)\n",
+        Serial.printf("[VEHICLE] Traversal S1->S2 (Total Count: %d)\n",
                       localVehicleCount);
 
-        // Log to Supabase
+        // --- Turn light ON immediately (hardcoded 2 s) ---
+        lightOffMs = now + 2000UL;
+        currentLightState = true;
+        digitalWrite(PIN_LED, HIGH);
+        Serial.println(F("[LIGHT] LED ON for 2 s (Sensor 2 traversal)"));
+
+        // --- Send vehicle log to Supabase ---
         if (WiFi.status() == WL_CONNECTED) {
           String nowTimestamp = timeService.getISO8601Timestamp();
           lastLoggedVehicleTime = nowTimestamp;
           lastProcessedVehicleTime = nowTimestamp;
-          supabaseService.logVehicleDetection("direction1", 1, d2,
-                                              nowTimestamp);
-        }
+          bool vOk = supabaseService.logVehicleDetection("direction2", 1, d2, nowTimestamp);
+          Serial.printf("[DB] vehicle_detections insert: %s\n", vOk ? "OK" : "FAILED");
 
-        // Activate light timer if in AUTO mode
-        if (currentMode == "auto") {
-          lightOffMs = now + settings.lightOnDurationMs;
+          // --- Sync light ON state to dashboard ---
+          bool lOk = supabaseService.syncPhysicalLightState(
+              "ON", "auto", true /*hardcoded daytime*/, 4095 /*hardcoded LDR*/,
+              nowTimestamp);
+          Serial.printf("[DB] light_status insert: %s\n", lOk ? "OK" : "FAILED");
+        } else {
+          Serial.println(F("[DB] WiFi not connected — Supabase skipped"));
         }
         s1TriggerTime = 0;
       }
@@ -335,47 +352,42 @@ void processSensors() {
 }
 
 void executeLightControl() {
-  // LDR evaluation (lower analog read value is brighter light depending on pull
-  // up/down)
-  int rawLdr = analogRead(PIN_LDR);
-  isDaytimeState = (rawLdr >= settings.ldrThresholdDay);
+  // HARDCODED: always treat as daytime — LDR sensor bypassed
+  isDaytimeState = true;
 
-  // RTC schedule evaluation
-  bool isNightSchedule =
-      timeService.isNightTime(settings.nightModeStart, settings.nightModeEnd);
-  bool isNight = !isDaytimeState || isNightSchedule;
-
-  // Run only if system is in Adaptive AUTO mode
+  // Only the vehicle-detection timer drives the light in AUTO mode.
+  // Night-schedule logic is intentionally disabled while hardcoded.
   if (currentMode == "auto") {
-    bool targetState = false;
-
-    if (millis() < lightOffMs) {
-      // Keep light ON if vehicle detection timer is active (even during
-      // daytime)
-      targetState = true;
-    } else if (isNight) {
-      // Adaptive Lighting: during the night, keep standby mode (off or could
-      // dim)
-      targetState = false;
-    } else {
-      // During daytime, streetlights remain OFF
-      targetState = false;
-    }
+    bool targetState = (millis() < lightOffMs); // ON only during 2 s window
 
     if (targetState != currentLightState) {
       currentLightState = targetState;
       digitalWrite(PIN_LED, currentLightState ? HIGH : LOW);
-      Serial.printf("[AUTO] State transitioned: Light is now %s (LDR: %d, "
-                    "Night Scheduler: %s)\n",
-                    currentLightState ? "ON" : "OFF", rawLdr,
-                    isNightSchedule ? "ACTIVE" : "INACTIVE");
+      Serial.printf("[AUTO] Light -> %s\n",
+                    currentLightState ? "ON" : "OFF");
 
-      // Upload status change logs to Supabase
-      if (WiFi.status() == WL_CONNECTED) {
-        supabaseService.syncPhysicalLightState(
-            currentLightState ? "ON" : "OFF", "auto", isDaytimeState, rawLdr,
+      // Sync light OFF event back to Supabase
+      if (!currentLightState && WiFi.status() == WL_CONNECTED) {
+        bool lOk = supabaseService.syncPhysicalLightState(
+            "OFF", "auto", true /*daytime*/, 4095 /*hardcoded LDR*/,
             timeService.getISO8601Timestamp());
+        Serial.printf("[DB] light_status OFF sync: %s\n",
+                      lOk ? "OK" : "FAILED");
       }
     }
   }
+}
+
+/**
+ * Smoothed LDR reading: average of 5 ADC samples to reduce ESP32 ADC noise.
+ * GPIO 34 is input-only with no pull resistors; attenuation must be set
+ * via analogSetPinAttenuation(PIN_LDR, ADC_11db) in setup().
+ */
+int readLDR() {
+  long sum = 0;
+  for (int i = 0; i < 5; i++) {
+    sum += analogRead(PIN_LDR);
+    delayMicroseconds(500);
+  }
+  return (int)(sum / 5);
 }

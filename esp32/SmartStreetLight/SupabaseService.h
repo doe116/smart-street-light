@@ -75,7 +75,7 @@ public:
    * Update device status (heartbeat, wifi, uptime, ldr) in device_status table
    */
   bool uploadHeartbeat(int rssi, long uptimeSeconds, int ldrValue,
-                       String firmware = "1.0.0");
+                       String timestamp, String firmware = "1.0.0");
 
   /**
    * Sync active physical light status back to dashboard_status aggregates

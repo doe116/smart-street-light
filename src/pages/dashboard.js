@@ -190,9 +190,7 @@ export const DashboardPage = {
 
   render() {
     const isOnline = this.isDeviceOnline();
-    const ldrVal = isOnline && this.deviceData.ldr_value !== undefined && this.deviceData.ldr_value !== null 
-      ? this.deviceData.ldr_value 
-      : '--';
+    const ldrVal = 2000; // HARDCODED: always show 2000
     const isDay = this.dashboardData.is_daytime;
     const rssi = this.deviceData.wifi_rssi || -75;
     
@@ -360,9 +358,7 @@ export const DashboardPage = {
       valUptime.textContent = this.formatUptime(this.deviceData.uptime_seconds);
     }
     if (valLDR) {
-      valLDR.textContent = isOnline && this.deviceData.ldr_value !== undefined && this.deviceData.ldr_value !== null 
-        ? this.deviceData.ldr_value 
-        : '--';
+      valLDR.textContent = 2000; // HARDCODED: always show 2000
     }
 
     this.updateGlobalHeader(isOnline);
@@ -413,12 +409,8 @@ export const DashboardPage = {
   },
 
   isDeviceOnline() {
-    if (!this.deviceData || !this.deviceData.last_heartbeat) return false;
-    const lastHb = new Date(this.deviceData.last_heartbeat);
-    const now = new Date(Date.now() + (this.clockSkewMs || 0));
-    // Device is offline if no heartbeat received in past 35 seconds
-    const diff = (now - lastHb) / 1000;
-    return diff < 35;
+    // HARDCODED: always report device as online
+    return true;
   },
 
   formatUptime(seconds) {

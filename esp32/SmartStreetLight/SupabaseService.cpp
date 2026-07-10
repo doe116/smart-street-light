@@ -205,14 +205,18 @@ bool SupabaseService::logVehicleDetection(String direction, int count,
 }
 
 bool SupabaseService::uploadHeartbeat(int rssi, long uptimeSeconds,
-                                      int ldrValue, String firmware) {
-  DynamicJsonDocument doc(256);
+                                      int ldrValue, String timestamp,
+                                      String firmware) {
+  DynamicJsonDocument doc(384);
   doc["id"] = 1;
   doc["wifi_rssi"] = rssi;
   doc["uptime_seconds"] = uptimeSeconds;
   doc["ldr_value"] = ldrValue;
   doc["status"] = "ONLINE";
   doc["firmware_version"] = firmware;
+  // Write the current wall-clock timestamp so the dashboard online-check works.
+  // The device_status.last_heartbeat column stores the last time ESP32 pinged.
+  doc["last_heartbeat"] = timestamp;
 
   String payload;
   serializeJson(doc, payload);
